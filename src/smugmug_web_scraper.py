@@ -21,6 +21,40 @@ class SmugMugWebScraper:
         self.gallery_url = gallery_url
         self.password = password
         self.commented_images = []
+        self.output_file = None
+        self._setup_output_file()
+    
+    def _setup_output_file(self, album_name="Dragonhood"):
+        """Setup output file for iterative writing"""
+        # Create output directory if it doesn't exist
+        output_dir = "/Users/trigg/Development/SmugMug-Client-Selection-Tool/output"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"commented_images_{album_name}_webscrape_{timestamp}.txt"
+        self.output_file = os.path.join(output_dir, filename)
+        
+        # Write header
+        with open(self.output_file, 'w') as f:
+            f.write(f"Images with Comments - {album_name} (Web Scrape)\n")
+            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Gallery URL: {self.gallery_url}\n")
+            f.write("=" * 50 + "\n")
+            f.write("LIVE RESULTS (written as found):\n")
+            f.write("=" * 50 + "\n\n")
+        
+        print(f"Output file initialized: {self.output_file}")
+    
+    def _append_result_to_file(self, filename, comments, image_index):
+        """Append a single result to output file immediately"""
+        try:
+            with open(self.output_file, 'a') as f:
+                f.write(f"{filename}\n")
+                f.flush()  # Force write to disk
+            print(f"  ✓ Added to output file: {filename}")
+        except Exception as e:
+            print(f"  ! Error writing to file: {e}")
         
     async def scrape_gallery_comments(self):
         """Main method to scrape comments from SmugMug gallery"""
@@ -95,9 +129,39 @@ class SmugMugWebScraper:
                     await page.wait_for_timeout(2000)
                     scroll_attempts += 1
                 
-                # Get final image count
-                image_elements = await page.query_selector_all('a[href*="/i-"], img[src*="smugmug"]')
-                print(f"Total images loaded after scrolling: {len(image_elements)} (expected ~268)")
+                # Get final image count - use more specific selector to avoid duplicates
+                # Try to get unique clickable image elements (prefer links over images)
+                link_elements = await page.query_selector_all('a[href*="/i-"]')
+                
+                # If no links found, try image elements
+                if not link_elements:
+                    image_elements = await page.query_selector_all('img[src*="smugmug"], .sm-tile img, .sm-gallery-image img')
+                else:
+                    image_elements = link_elements
+                
+                # Deduplicate by href/src to get actual unique images
+                unique_elements = []
+                seen_urls = set()
+                
+                for element in image_elements:
+                    try:
+                        if element.evaluate:
+                            href = await element.get_attribute('href')
+                            if href and '/i-' in href:
+                                if href not in seen_urls:
+                                    unique_elements.append(element)
+                                    seen_urls.add(href)
+                            else:
+                                src = await element.get_attribute('src')
+                                if src and src not in seen_urls:
+                                    unique_elements.append(element)
+                                    seen_urls.add(src)
+                    except:
+                        continue
+                
+                image_elements = unique_elements
+                print(f"Total UNIQUE images found: {len(image_elements)} (expected ~268)")
+                print(f"Deduplication removed {len(await page.query_selector_all('a[href*=\"/i-\"], img[src*=\"smugmug\"]')) - len(image_elements)} duplicate elements")
                 
                 if len(image_elements) == 0:
                     print("ERROR: No image elements found. The gallery structure may be different than expected.")
@@ -132,11 +196,16 @@ class SmugMugWebScraper:
                                 # Get image filename/title
                                 filename = await self.get_image_filename(page)
                                 if filename:
-                                    self.commented_images.append({
+                                    result_item = {
                                         'filename': filename,
                                         'comments': comments_found,
                                         'image_index': i + 1
-                                    })
+                                    }
+                                    self.commented_images.append(result_item)
+                                    
+                                    # Write to file immediately (iterative writing)
+                                    self._append_result_to_file(filename, comments_found, i + 1)
+                                    
                                     print(f"  ✓ Found {len(comments_found)} comments on {filename}")
                                 else:
                                     print(f"  ✓ Found comments but couldn't extract filename")
@@ -159,6 +228,9 @@ class SmugMugWebScraper:
                     print("No images found to process")
                 
                 print(f"\nScan complete! Found {len(self.commented_images)} images with comments")
+                
+                # Update output file with final summary
+                self._finalize_output_file()
                 
             except Exception as e:
                 print(f"Error during scraping: {str(e)}")
@@ -341,51 +413,42 @@ class SmugMugWebScraper:
             print(f"    Error getting filename: {str(e)}")
             return f"Unknown_{datetime.now().strftime('%H%M%S')}"
     
+    def _finalize_output_file(self):
+        """Add final summary to output file"""
+        try:
+            with open(self.output_file, 'a') as f:
+                f.write(f"\n" + "=" * 50 + "\n")
+                f.write(f"FINAL SUMMARY:\n")
+                f.write(f"=" * 50 + "\n")
+                f.write(f"Total: {len(self.commented_images)} images with comments\n")
+                f.write(f"Scan completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                
+                # Include comment details
+                f.write(f"\n" + "=" * 50 + "\n")
+                f.write(f"COMMENT DETAILS:\n")
+                f.write(f"=" * 50 + "\n\n")
+                
+                for item in self.commented_images:
+                    f.write(f"File: {item['filename']}\n")
+                    f.write(f"Comments ({len(item['comments'])}):\n")
+                    
+                    for comment in item['comments']:
+                        author = comment.get('author', 'Unknown')
+                        text = comment.get('text', '')
+                        f.write(f"  - {author}: {text}\n")
+                    
+                    f.write(f"\n")
+        except Exception as e:
+            print(f"Error finalizing output file: {e}")
+    
     def save_results(self, album_name="Dragonhood"):
-        """Save the results to a text file"""
+        """Return the output file path (file already written iteratively)"""
         if not self.commented_images:
-            print("No commented images to save")
-            return
+            print("No commented images found")
+            return self.output_file
         
-        # Create output directory if it doesn't exist
-        output_dir = "/Users/trigg/Development/SmugMug-Client-Selection-Tool/output"
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Generate filename with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"commented_images_{album_name}_webscrape_{timestamp}.txt"
-        filepath = os.path.join(output_dir, filename)
-        
-        # Write the results
-        with open(filepath, 'w') as f:
-            f.write(f"Images with Comments - {album_name} (Web Scrape)\n")
-            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Gallery URL: {self.gallery_url}\n")
-            f.write("=" * 50 + "\n\n")
-            
-            for item in self.commented_images:
-                f.write(f"{item['filename']}\n")
-            
-            f.write(f"\nTotal: {len(self.commented_images)} images with comments\n")
-            
-            # Include comment details
-            f.write("\n" + "=" * 50 + "\n")
-            f.write("COMMENT DETAILS:\n")
-            f.write("=" * 50 + "\n\n")
-            
-            for item in self.commented_images:
-                f.write(f"File: {item['filename']}\n")
-                f.write(f"Comments ({len(item['comments'])}):\n")
-                
-                for comment in item['comments']:
-                    author = comment.get('author', 'Unknown')
-                    text = comment.get('text', '')
-                    f.write(f"  - {author}: {text}\n")
-                
-                f.write("\n")
-        
-        print(f"\nResults saved to: {filepath}")
-        return filepath
+        print(f"\nResults written iteratively to: {self.output_file}")
+        return self.output_file
 
 
 async def main():
