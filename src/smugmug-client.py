@@ -43,8 +43,14 @@ class SmugMugClient:
         """Make authenticated request to SmugMug API with error handling"""
         url = f"{self.base_url}{endpoint}"
         
+        # Add proper headers for SmugMug API
+        headers = {
+            'Accept': 'application/json',
+            'User-Agent': 'SmugMug-Client-Selection-Tool/1.0'
+        }
+        
         try:
-            response = self.session.get(url, params=params)
+            response = self.session.get(url, params=params, headers=headers)
             response.raise_for_status()
             
             # Rate limiting - be respectful

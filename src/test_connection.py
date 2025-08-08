@@ -31,8 +31,12 @@ def test_connection():
             resource_owner_secret=credentials['oauth_secret']
         )
         
-        # Test API call
-        response = requests.get("https://api.smugmug.com/api/v2/user/triggbowlin", auth=auth)
+        # Test API call - try the general user endpoint first with proper headers
+        headers = {
+            'Accept': 'application/json',
+            'User-Agent': 'SmugMug-Client-Selection-Tool/1.0'
+        }
+        response = requests.get("https://api.smugmug.com/api/v2!authuser", auth=auth, headers=headers)
         
         print(f"Response status: {response.status_code}")
         print(f"Response headers: {dict(response.headers)}")
