@@ -111,9 +111,11 @@ class SmugMugClient:
         print(f"Found {len(images)} images in album")
         return images
         
-    def get_image_comments(self, image_key):
+    def get_image_comments(self, image_key, serial=0):
         """Check if an image has comments"""
-        response = self.make_request(f"/image/{image_key}!comments")
+        # SmugMug requires serial number format: imagekey-serial
+        full_image_key = f"{image_key}-{serial}"
+        response = self.make_request(f"/image/{full_image_key}!comments")
         
         if not response or 'Response' not in response:
             return []
@@ -121,9 +123,11 @@ class SmugMugClient:
         comments = response['Response'].get('Comment', [])
         return comments
         
-    def get_image_details(self, image_key):
+    def get_image_details(self, image_key, serial=0):
         """Get detailed information about an image including filename"""
-        response = self.make_request(f"/image/{image_key}")
+        # SmugMug requires serial number format: imagekey-serial
+        full_image_key = f"{image_key}-{serial}"
+        response = self.make_request(f"/image/{full_image_key}")
         
         if not response or 'Response' not in response:
             return None
